@@ -1,0 +1,96 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #7c3aed;
+  --color-primary-hover: #6d28d9;
+  --color-primary-light: #f5f3ff;
+  --color-primary-muted: #e9e3ff;
+  
+  --color-bg-lavender: #faf9ff;
+  --color-border-lavender: #eeebfc;
+  --color-text-lavender: #8b5cf6;
+  
+  --color-success: #10b981;
+  --color-success-light: #ecfdf5;
+  --color-error: #ef4444;
+  --color-error-light: #fef2f2;
+  --color-warning: #f59e0b;
+  --color-warning-light: #fffbeb;
+  
+  --radius-xl: 12px;
+  --radius-lg: 8px;
+  --radius-md: 6px;
+  --radius-sm: 4px;
+}
+
+:root {
+  --background: #ffffff;
+  --foreground: #1e1b4b; /* Deep Indigo text for better premium contrast */
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* Custom Scrollbar styling for a polished UI */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #e4e4e7;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #d4d4d8;
+}
+
+/* Custom styles for JSON and Editor inputs */
+.monaco-editor-wrapper {
+  border: 1px solid var(--color-border-lavender);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.glow-purple {
+  box-shadow: 0 0 12px 0 rgba(124, 58, 237, 0.08);
+}
+
+.glow-success {
+  box-shadow: 0 0 12px 0 rgba(16, 185, 129, 0.08);
+}
+
+/* Animation utilities */
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.33);
+  }
+  80%, 100% {
+    opacity: 0;
+  }
+}
+
+.pulse-dot {
+  position: relative;
+}
+
+.pulse-dot::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: -4px;
+  width: calc(100% + 8px);
+  height: calc(100% + 8px);
+  border-radius: 50%;
+  background-color: currentColor;
+  opacity: 0.4;
+  animation: pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
