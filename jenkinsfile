@@ -1,0 +1,108 @@
+@Library('devops-pipeline-lib@main-v1') _
+
+Main([
+applicationName: "super-switch-mp",
+
+// language of the application, can be "java", "python", "nodejs",
+language: "go",
+
+// container_port for the application
+containerPort: "8888",
+
+// for deploying stage on premises, set to true
+onprem_stage: "false",
+
+// Resource requests and limits
+resources: [
+memoryRequest: "250Mi",
+cpuRequest: "250m",
+memoryLimit: "500Mi",
+cpuLimit: "500m",
+replicaCount: "3"
+],
+
+probes: [
+type: "http",
+readinessEnabled: false,
+livenessEnabled: false,
+healthCheckPath: "/mpurse/super-switch/v1/HbtChk",
+readinessInitialDelay: "30",
+livenessInitialDelay: "15"
+],
+
+notifications: [
+// approvers for the pipeline
+teamLead: "sovit",
+// email notifications
+emailRecipients: "alok.sahoo@iserveu.co.in",
+],
+
+// labels and selectors for the Kubernetes deployment
+metadata: [
+// for authentication, set to "auth" or "no-auth" or if both "both" this is for gateway
+authStatus: "both",
+
+// for application type, set to "backend" or "frontend"
+
+applicationType: "backend",
+// for example kotak, bob, ta,mpurse
+organizationName: "mpurse"
+],
+
+// environments configuration
+// ====< TO BE MAINTAINED BY DEVOPS TEAM >====
+environments: [
+dev: [
+project: "internal-isu-tools",
+region: "asia-south1-a",
+cluster: "kubernetes",
+namespace: "mpurse-dev",
+credentialsId: "onprem-creds",
+artifactCredsId: "internal-isu-tools",
+registryLocation: "asia-south1-docker.pkg.dev",
+repositoryName: "onprem-hybrid-repo"
+],
+stage: [
+project: "internal-isu-tools",
+region: "asia-south1-a",
+cluster: "kubernetes",
+namespace: "mpurse-stage",
+credentialsId: "onprem-creds",
+artifactCredsId: "internal-isu-tools",
+registryLocation: "asia-south1-docker.pkg.dev",
+repositoryName: "onprem-hybrid-repo"
+],
+
+uat: [
+project: "mpurse-496008",
+region: "asia-south2-a",
+cluster: "mpurse-uat-dr-cluster",
+namespace: "mpurse-uat",
+credentialsId: "isu-mpurse-id",
+artifactCredsId: "isu-mpurse-id",
+registryLocation: "asia-south2-docker.pkg.dev",
+repositoryName: "mpurse-uat"
+],
+release: [
+project: "mpurse-496008",
+region: "asia-south1-a",
+cluster: "mpurse-dc-cluster",
+namespace: "mpurse",
+credentialsId: "isu-mpurse-id",
+artifactCredsId: "isu-mpurse-id",
+registryLocation: "asia-south1-docker.pkg.dev",
+repositoryName: "mpurse-dc"
+],
+dr: [
+project: "mpurse-496008",
+region: "asia-south2-a",
+cluster: "mpurse-uat-dr-cluster",
+namespace: "mpurse",
+credentialsId: "isu-mpurse-id",
+artifactCredsId: "isu-mpurse-id",
+registryLocation: "asia-south2-docker.pkg.dev",
+repositoryName: "mpurse-dr"
+]]
+
+]
+)
