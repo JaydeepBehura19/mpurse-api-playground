@@ -24,6 +24,7 @@ export function usePaymentPlayground() {
   const [clientSecret, setClientSecret] = useState<string>("");
   const [encryptionKey, setEncryptionKey] = useState<string>("");
   const [passKey, setPassKey] = useState<string>("");
+  const [mid, setMid] = useState<string>("");
   const [sessionUrl, setSessionUrl] = useState<string>(DEFAULT_SESSION_URL);
 
   // Request Body
@@ -45,6 +46,7 @@ export function usePaymentPlayground() {
       setClientSecret(localStorage.getItem("mpurse_client_secret") || "");
       setEncryptionKey(localStorage.getItem("mpurse_encryption_key") || "");
       setPassKey(localStorage.getItem("mpurse_pass_key") || "");
+      setMid(localStorage.getItem("mpurse_mid") || "");
       setSessionUrl(localStorage.getItem("mpurse_session_url") || DEFAULT_SESSION_URL);
       
       const savedJson = localStorage.getItem("mpurse_json_body");
@@ -70,6 +72,10 @@ export function usePaymentPlayground() {
   useEffect(() => {
     localStorage.setItem("mpurse_pass_key", passKey);
   }, [passKey]);
+
+  useEffect(() => {
+    localStorage.setItem("mpurse_mid", mid);
+  }, [mid]);
 
   useEffect(() => {
     localStorage.setItem("mpurse_session_url", sessionUrl);
@@ -197,7 +203,8 @@ export function usePaymentPlayground() {
         "POST",
         {
           pass_key: passKey,
-          header_secrets: encryptedHeaderSecret
+          header_secrets: encryptedHeaderSecret,
+          mid: mid || "null"
         },
         {
           RequestData: encryptedRequestBody
@@ -286,6 +293,7 @@ export function usePaymentPlayground() {
     setClientSecret("");
     setEncryptionKey("");
     setPassKey("");
+    setMid("");
     setSessionUrl(DEFAULT_SESSION_URL);
     setJsonBody(DEFAULT_JSON);
     setResponse(null);
@@ -303,6 +311,8 @@ export function usePaymentPlayground() {
     setEncryptionKey,
     passKey,
     setPassKey,
+    mid,
+    setMid,
     sessionUrl,
     setSessionUrl,
     jsonBody,
