@@ -29,6 +29,8 @@ export default function Home() {
     setEncryptionKey,
     passKey,
     setPassKey,
+    mid,
+    setMid,
     sessionUrl,
     setSessionUrl,
     jsonBody,
@@ -217,6 +219,20 @@ export default function Home() {
                     {showPassKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
+              </div>
+
+              {/* MID */}
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wide">
+                  MID
+                </label>
+                <input
+                  type="text"
+                  placeholder="Enter merchant id..."
+                  value={mid}
+                  onChange={(e) => setMid(e.target.value)}
+                  className="w-full bg-white border border-[#eeebfc] rounded-lg px-3 py-2 text-xs text-zinc-800 placeholder-zinc-400 focus:outline-hidden focus:ring-1 focus:ring-[#7c3aed] focus:border-[#7c3aed] transition-all"
+                />
               </div>
             </div>
           </div>
