@@ -400,6 +400,47 @@ export default function Home() {
                 <pre className="flex-1 p-3.5 bg-zinc-50 border border-zinc-150 rounded-lg font-mono text-[11px] text-zinc-700 overflow-auto max-h-[300px] leading-relaxed">
                   {JSON.stringify(response, null, 2)}
                 </pre>
+              ) : error && typeof error !== "string" ? (
+                <div className="flex-1 p-4 bg-rose-50 border border-rose-100 rounded-lg text-rose-700 font-mono text-[11px] overflow-auto max-h-[300px] flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <div className="font-bold flex items-center gap-1.5">
+                      <AlertCircle className="h-4.5 w-4.5 shrink-0 text-rose-500" />
+                      {error.step} Failed
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {error.status !== undefined && (
+                        <span className="px-2 py-0.5 rounded-md bg-rose-600 text-white font-bold text-[10px]">
+                          {error.status} {error.statusText || ""}
+                        </span>
+                      )}
+                      {error.duration !== undefined && (
+                        <span className="px-2 py-0.5 rounded-md bg-zinc-200 text-zinc-700 font-bold text-[10px]">
+                          {error.duration}ms
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <pre className="text-rose-600 leading-normal whitespace-pre-wrap">{error.message}</pre>
+
+                  {error.data !== undefined && error.data !== null && (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-rose-400">Response Body</span>
+                      <pre className="p-3 bg-white border border-rose-100 rounded-lg text-zinc-700 overflow-auto max-h-[180px] whitespace-pre-wrap">
+                        {typeof error.data === "string" ? error.data : JSON.stringify(error.data, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+
+                  {error.headers && Object.keys(error.headers).length > 0 && (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-rose-400">Response Headers</span>
+                      <pre className="p-3 bg-white border border-rose-100 rounded-lg text-zinc-700 overflow-auto max-h-[120px] whitespace-pre-wrap">
+                        {JSON.stringify(error.headers, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                </div>
               ) : error ? (
                 <div className="flex-1 p-4 bg-rose-50 border border-rose-100 rounded-lg text-rose-700 font-mono text-[11px] overflow-auto max-h-[300px]">
                   <div className="font-bold flex items-center gap-1.5 mb-2">

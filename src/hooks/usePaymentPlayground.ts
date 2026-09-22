@@ -1,6 +1,16 @@
 import { useState, useEffect, useCallback } from "react";
 import { executeApiStep } from "@/services/api";
 
+export interface ApiErrorDetail {
+  step: string;
+  status?: number;
+  statusText?: string;
+  data?: any;
+  headers?: Record<string, string>;
+  duration?: number;
+  message: string;
+}
+
 const DEFAULT_JSON = `{
   "order_id": "ORDER_${Math.floor(1000 + Math.random() * 9000)}",
   "amount": "1788.00",
@@ -33,7 +43,7 @@ export function usePaymentPlayground() {
   // Execution States
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [response, setResponse] = useState<any>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | ApiErrorDetail | null>(null);
   const [paymentUrl, setPaymentUrl] = useState<string | undefined>(undefined);
 
   // Toast System
@@ -124,6 +134,39 @@ export function usePaymentPlayground() {
     return undefined;
   };
 
+  // Build a Postman-style structured error from a failed step's raw result
+  const failStep = (step: string, result: {
+    status?: number;
+    statusText?: string;
+    data?: any;
+    headers?: Record<string, string>;
+    duration?: number;
+    error?: string;
+  }) => {
+    let message: string = result.error || "";
+    if (!message && result.data && typeof result.data === "object") {
+      message = result.data.error || result.data.message || "";
+    }
+    if (!message && typeof result.data === "string") {
+      message = result.data;
+    }
+    if (!message) {
+      message = `${step} failed`;
+    }
+
+    setError({
+      step,
+      status: result.status,
+      statusText: result.statusText,
+      data: result.data,
+      headers: result.headers,
+      duration: result.duration,
+      message,
+    });
+    showToast(`${step} failed${result.status ? ` (${result.status})` : ""}`, "error");
+    setIsRunning(false);
+  };
+
   // Main Execute Sequence
   const executePlaygroundFlow = async () => {
     if (isRunning) return;
@@ -169,11 +212,8 @@ export function usePaymentPlayground() {
       );
 
       if (!resStep1.success || !resStep1.data?.RequestData) {
-        throw new Error(
-          resStep1.data?.error || 
-          resStep1.error || 
-          "Failed to encrypt credentials (/hencr)"
-        );
+        failStep("Header Encryption (/hencr)", resStep1);
+        return;
       }
 
       const encryptedHeaderSecret = resStep1.data.RequestData;
@@ -188,11 +228,8 @@ export function usePaymentPlayground() {
       );
 
       if (!resStep2.success || !resStep2.data?.RequestData) {
-        throw new Error(
-          resStep2.data?.error || 
-          resStep2.error || 
-          "Failed to encrypt request body (/encr)"
-        );
+        failStep("Request Body Encryption (/encr)", resStep2);
+        return;
       }
 
       const encryptedRequestBody = resStep2.data.RequestData;
@@ -213,8 +250,8 @@ export function usePaymentPlayground() {
       );
 
       if (!resStep3.success) {
-        setResponse(resStep3.data || { error: "Session creation rejected with non-2xx status code" });
-        throw new Error(resStep3.error || "Session creation API returned an error status");
+        failStep("Payment Session Creation", resStep3);
+        return;
       }
 
       // STEP 4: Automatically extract ResponseData
@@ -254,11 +291,8 @@ export function usePaymentPlayground() {
       );
 
       if (!resDecr.success) {
-        throw new Error(
-          resDecr.data?.error || 
-          resDecr.error || 
-          "Failed to decrypt payment session response (/decr)"
-        );
+        failStep("Response Decryption (/decr)", resDecr);
+        return;
       }
 
       // STEP 6: Render ONLY the FINAL DECRYPTED RESPONSE
