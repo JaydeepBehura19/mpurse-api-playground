@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { usePaymentPlayground } from "@/hooks/usePaymentPlayground";
 import { ToastContainer } from "@/components/Toast";
+import { StepDetailList } from "@/components/StepDetailList";
 import Editor from "@monaco-editor/react";
 import {
   Key,
@@ -23,8 +24,47 @@ import {
   ChevronLeft,
   History,
   Sun,
-  Moon
+  Moon,
+  Bookmark,
+  Plus
 } from "lucide-react";
+
+type PayloadMode = "direct" | "session" | null;
+
+const DIRECT_SESSION_URL = "https://api-uat-mpurse.txninfra.com/mpurse/super-switch/v1/payments/upi/direct";
+const SESSION_SESSION_URL = "https://api-uat-mpurse.txninfra.com/mpurse/super-switch/v1/payments/session";
+
+const DIRECT_PAYLOAD_JSON = `{
+  "payeeVPA": "subhakanticcw@nsdl",
+  "paymentMode": "INTENT",
+  "txnAmount": "1000.00",
+  "channelId": "WEBUSER",
+  "txnNote": "StandardizationTest",
+  "order_id": "doomsdaydec",
+  "merchantType": "AGGREGATE",
+  "expiryTime": "15",
+  "cust_name": "john",
+  "cust_mobilenumber": "8303344556",
+  "currency": "INR",
+  "param_a": "12345678",
+  "param_b": "",
+  "param_c": ""
+}`;
+
+const SESSION_PAYLOAD_JSON = `{
+  "order_id": "ORDER_2020202020202",
+  "amount": "100.00",
+  "currency": "INR",
+  "action": "paymentPage",
+  "mode": "web",
+  "return_url": "https://merchant.com/checkout/status",
+  "customer_id": "1234",
+  "customer_email": "abc@gmail.com",
+  "customer_phone": "6789987623",
+  "first_name": "Alex",
+  "last_name": "Hunter",
+  "description": "Premium Subscription"
+}`;
 
 export default function Home() {
   const {
@@ -48,6 +88,12 @@ export default function Home() {
     paymentUrl,
     steps,
     history,
+    deleteHistoryEntry,
+    clearHistory,
+    savedPresets,
+    addSavedPreset,
+    deleteSavedPreset,
+    clearCredentials,
     toasts,
     executePlaygroundFlow,
     cancelPlaygroundFlow,
@@ -64,6 +110,28 @@ export default function Home() {
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [copiedResponse, setCopiedResponse] = useState<boolean>(false);
   const [showHeaders, setShowHeaders] = useState<boolean>(false);
+  const [showStepDetails, setShowStepDetails] = useState<boolean>(false);
+
+  // Payload mode preset (Direct / Session / custom)
+  const [payloadMode, setPayloadMode] = useState<PayloadMode>(null);
+
+  const handleSelectPayloadMode = (mode: "direct" | "session") => {
+    if (payloadMode === mode) {
+      // Deselect: clear both the payload and the URL
+      setPayloadMode(null);
+      setJsonBody("");
+      setSessionUrl("");
+    } else {
+      setPayloadMode(mode);
+      if (mode === "direct") {
+        setJsonBody(DIRECT_PAYLOAD_JSON);
+        setSessionUrl(DIRECT_SESSION_URL);
+      } else {
+        setJsonBody(SESSION_PAYLOAD_JSON);
+        setSessionUrl(SESSION_SESSION_URL);
+      }
+    }
+  };
 
   // Theme state
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -91,8 +159,9 @@ export default function Home() {
   // Replay / history panel state
   const [showHistoryPanel, setShowHistoryPanel] = useState<boolean>(false);
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
-  const [historyTab, setHistoryTab] = useState<"request" | "response">("request");
+  const [historyTab, setHistoryTab] = useState<"request" | "response" | "steps">("request");
   const [copiedHistory, setCopiedHistory] = useState<boolean>(false);
+  const historyPanelRef = useRef<HTMLDivElement>(null);
 
   const selectedHistoryEntry = history.find((h) => h.id === selectedHistoryId) || null;
 
@@ -113,10 +182,160 @@ export default function Home() {
     setTimeout(() => setCopiedHistory(false), 2000);
   };
 
+  const handleClearHistory = () => {
+    clearHistory();
+    showToast("History cleared", "info");
+  };
+
+  // Saved credential presets (Merchant -> Environment -> Account)
+  const [showSavedPanel, setShowSavedPanel] = useState<boolean>(false);
+  const [savedMerchant, setSavedMerchant] = useState<string | null>(null);
+  const [savedEnvironment, setSavedEnvironment] = useState<string | null>(null);
+  const [showAddPresetForm, setShowAddPresetForm] = useState<boolean>(false);
+  const [newPresetMerchant, setNewPresetMerchant] = useState<string>("");
+  const [newPresetEnvironment, setNewPresetEnvironment] = useState<string>("");
+  const [newPresetAccountLabel, setNewPresetAccountLabel] = useState<string>("");
+  const [newPresetIncludeMid, setNewPresetIncludeMid] = useState<boolean>(false);
+  const savedPanelRef = useRef<HTMLDivElement>(null);
+
+  const merchantList = Array.from(new Set(savedPresets.map((p) => p.merchant)));
+  const environmentList = savedMerchant
+    ? Array.from(new Set(savedPresets.filter((p) => p.merchant === savedMerchant).map((p) => p.environment)))
+    : [];
+  const accountList =
+    savedMerchant && savedEnvironment
+      ? savedPresets.filter((p) => p.merchant === savedMerchant && p.environment === savedEnvironment)
+      : [];
+
+  const handleCloseSavedPanel = () => {
+    setShowSavedPanel(false);
+    setSavedMerchant(null);
+    setSavedEnvironment(null);
+    setShowAddPresetForm(false);
+  };
+
+  const handleBackSaved = () => {
+    if (showAddPresetForm) {
+      setShowAddPresetForm(false);
+    } else if (savedEnvironment) {
+      setSavedEnvironment(null);
+    } else if (savedMerchant) {
+      setSavedMerchant(null);
+    }
+  };
+
+  const handleApplyPreset = (p: typeof savedPresets[number]) => {
+    setClientId(p.clientId);
+    setClientSecret(p.clientSecret);
+    setEncryptionKey(p.encryptionKey);
+    setPassKey(p.passKey);
+    // Always set MID explicitly (clearing it when the preset doesn't carry one)
+    // so a previous merchant's MID never lingers into an unrelated preset.
+    setMid(p.mid !== undefined ? p.mid : "");
+    showToast(`Loaded ${p.merchant} ${p.environment} — ${p.accountLabel}`, "success");
+    handleCloseSavedPanel();
+  };
+
+  const handleOpenAddPresetForm = () => {
+    setNewPresetMerchant(savedMerchant || "");
+    setNewPresetEnvironment(savedEnvironment || "");
+    setNewPresetAccountLabel("");
+    setNewPresetIncludeMid(false);
+    setShowAddPresetForm(true);
+  };
+
+  const handleSavePresetForm = () => {
+    if (!newPresetMerchant.trim() || !newPresetEnvironment.trim() || !newPresetAccountLabel.trim()) {
+      showToast("Merchant, environment, and account label are all required", "error");
+      return;
+    }
+    addSavedPreset({
+      merchant: newPresetMerchant.trim(),
+      environment: newPresetEnvironment.trim(),
+      accountLabel: newPresetAccountLabel.trim(),
+      clientId,
+      clientSecret,
+      encryptionKey,
+      passKey,
+      ...(newPresetIncludeMid ? { mid } : {}),
+    });
+    showToast("Preset saved", "success");
+    setSavedMerchant(newPresetMerchant.trim());
+    setSavedEnvironment(newPresetEnvironment.trim());
+    setShowAddPresetForm(false);
+  };
+
+  const handleDeletePreset = (id: string) => {
+    deleteSavedPreset(id);
+  };
+
+  // Close the Saved popover when clicking outside of it
+  useEffect(() => {
+    if (!showSavedPanel) return;
+
+    const handleClickOutsideSaved = (e: MouseEvent) => {
+      if (savedPanelRef.current && !savedPanelRef.current.contains(e.target as Node)) {
+        handleCloseSavedPanel();
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutsideSaved);
+    return () => document.removeEventListener("mousedown", handleClickOutsideSaved);
+  }, [showSavedPanel]);
+
+  const handleClearCredentials = () => {
+    clearCredentials();
+  };
+
+  const handleDeleteHistoryEntry = (id: string) => {
+    deleteHistoryEntry(id);
+    if (selectedHistoryId === id) {
+      setSelectedHistoryId(null);
+    }
+  };
+
+  // Close the history popover when clicking outside of it
+  useEffect(() => {
+    if (!showHistoryPanel) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (historyPanelRef.current && !historyPanelRef.current.contains(e.target as Node)) {
+        handleCloseHistoryPanel();
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showHistoryPanel]);
+
+  // Live clock
+  const [now, setNow] = useState<Date | null>(null);
+
+  useEffect(() => {
+    setNow(new Date());
+    const interval = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const formattedDate = now
+    ? now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : "";
+  const formattedDay = now ? now.toLocaleDateString("en-US", { weekday: "short" }) : "";
+  const formattedTime = now
+    ? now.toLocaleTimeString("en-GB", { hour12: false })
+    : "";
+
   // Collapse the headers section again whenever a new error comes in
   useEffect(() => {
     setShowHeaders(false);
   }, [error]);
+
+  // Collapse step details whenever a new run starts
+  useEffect(() => {
+    if (isRunning) {
+      setShowStepDetails(false);
+    }
+  }, [isRunning]);
 
   useEffect(() => {
     if (!jsonBody.trim()) {
@@ -168,11 +387,212 @@ export default function Home() {
 
           {/* SECTION 1: API Credentials */}
           <div className="bg-white border border-[#eeebfc] rounded-xl p-4 shadow-xs flex flex-col gap-3 shrink-0 dark:bg-zinc-900 dark:border-zinc-800">
-            <div className="flex items-center gap-2 border-b border-zinc-50 pb-2 shrink-0 dark:border-zinc-800">
-              <Key className="h-4 w-4 text-[#7c3aed]" />
-              <h2 className="text-xs font-bold text-zinc-800 tracking-wide uppercase dark:text-zinc-100">
-                1. API Credentials
-              </h2>
+            <div className="flex items-center justify-between border-b border-zinc-50 pb-2 shrink-0 dark:border-zinc-800">
+              <div className="flex items-center gap-2">
+                <Key className="h-4 w-4 text-[#7c3aed]" />
+                <h2 className="text-xs font-bold text-zinc-800 tracking-wide uppercase dark:text-zinc-100">
+                  1. API Credentials
+                </h2>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className="relative" ref={savedPanelRef}>
+                  <button
+                    onClick={() => {
+                      setShowSavedPanel((prev) => !prev);
+                      setSavedMerchant(null);
+                      setSavedEnvironment(null);
+                      setShowAddPresetForm(false);
+                    }}
+                    className="flex items-center justify-center p-1.5 border border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 rounded-md text-zinc-600 transition-colors duration-150 cursor-pointer dark:border-zinc-700 dark:hover:border-zinc-600 dark:hover:bg-zinc-800 dark:text-zinc-300"
+                    title="Saved credential presets"
+                  >
+                    <Bookmark className="h-3.5 w-3.5" />
+                  </button>
+
+                  {showSavedPanel && (
+                    <div className="absolute left-0 top-full mt-2 w-72 bg-white border border-[#eeebfc] rounded-xl shadow-lg z-50 overflow-hidden dark:bg-zinc-900 dark:border-zinc-700">
+                      <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-50 dark:border-zinc-800">
+                        <div className="flex items-center gap-1.5">
+                          {(savedMerchant || showAddPresetForm) && (
+                            <button
+                              onClick={handleBackSaved}
+                              className="text-zinc-400 hover:text-zinc-700 cursor-pointer dark:text-zinc-500 dark:hover:text-zinc-200"
+                            >
+                              <ChevronLeft className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                          <span className="text-[10px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                            {showAddPresetForm
+                              ? "Save Preset"
+                              : savedEnvironment
+                              ? `${savedMerchant} · ${savedEnvironment}`
+                              : savedMerchant
+                              ? savedMerchant
+                              : "Saved Presets"}
+                          </span>
+                        </div>
+                        <button
+                          onClick={handleCloseSavedPanel}
+                          className="text-[10px] font-semibold text-zinc-400 hover:text-zinc-700 cursor-pointer dark:text-zinc-500 dark:hover:text-zinc-200"
+                        >
+                          Close
+                        </button>
+                      </div>
+
+                      {showAddPresetForm ? (
+                        <div className="p-3 flex flex-col gap-2.5">
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[9.5px] font-bold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+                              Merchant
+                            </label>
+                            <input
+                              type="text"
+                              value={newPresetMerchant}
+                              onChange={(e) => setNewPresetMerchant(e.target.value)}
+                              placeholder="e.g. MPurse"
+                              className="w-full bg-white border border-[#eeebfc] rounded-md px-2.5 py-1.5 text-xs text-zinc-800 placeholder-zinc-400 focus:outline-hidden focus:ring-1 focus:ring-[#7c3aed] focus:border-[#7c3aed] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-100 dark:placeholder-zinc-500"
+                            />
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[9.5px] font-bold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+                              Environment
+                            </label>
+                            <input
+                              type="text"
+                              value={newPresetEnvironment}
+                              onChange={(e) => setNewPresetEnvironment(e.target.value)}
+                              placeholder="e.g. UAT"
+                              className="w-full bg-white border border-[#eeebfc] rounded-md px-2.5 py-1.5 text-xs text-zinc-800 placeholder-zinc-400 focus:outline-hidden focus:ring-1 focus:ring-[#7c3aed] focus:border-[#7c3aed] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-100 dark:placeholder-zinc-500"
+                            />
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[9.5px] font-bold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+                              Account Label
+                            </label>
+                            <input
+                              type="text"
+                              value={newPresetAccountLabel}
+                              onChange={(e) => setNewPresetAccountLabel(e.target.value)}
+                              placeholder="e.g. MPURSEM0000000090"
+                              className="w-full bg-white border border-[#eeebfc] rounded-md px-2.5 py-1.5 text-xs text-zinc-800 placeholder-zinc-400 focus:outline-hidden focus:ring-1 focus:ring-[#7c3aed] focus:border-[#7c3aed] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-100 dark:placeholder-zinc-500"
+                            />
+                          </div>
+                          <label className="flex items-center gap-2 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={newPresetIncludeMid}
+                              onChange={(e) => setNewPresetIncludeMid(e.target.checked)}
+                              className="h-3.5 w-3.5 accent-[#7c3aed] cursor-pointer"
+                            />
+                            <span className="text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
+                              Also save MID ({mid || "empty"})
+                            </span>
+                          </label>
+                          <button
+                            onClick={handleSavePresetForm}
+                            className="mt-1 w-full py-1.5 bg-[#7c3aed] hover:bg-[#6d28d9] text-white rounded-md text-xs font-semibold cursor-pointer"
+                          >
+                            Save
+                          </button>
+                        </div>
+                      ) : !savedMerchant ? (
+                        <div className="max-h-64 overflow-y-auto">
+                          {merchantList.length === 0 ? (
+                            <div className="px-3 py-6 text-center text-[11px] text-zinc-400 italic dark:text-zinc-500">
+                              No saved presets yet
+                            </div>
+                          ) : (
+                            merchantList.map((m) => (
+                              <button
+                                key={m}
+                                onClick={() => setSavedMerchant(m)}
+                                className="w-full flex items-center justify-between px-3 py-2.5 border-b border-zinc-50 last:border-0 hover:bg-zinc-50 cursor-pointer text-left dark:border-zinc-800 dark:hover:bg-zinc-800"
+                              >
+                                <span className="text-[11px] font-medium text-zinc-700 dark:text-zinc-200">{m}</span>
+                                <ChevronRight className="h-3.5 w-3.5 text-zinc-400 dark:text-zinc-500" />
+                              </button>
+                            ))
+                          )}
+                          <button
+                            onClick={handleOpenAddPresetForm}
+                            className="w-full flex items-center gap-1.5 px-3 py-2.5 text-[11px] font-semibold text-[#7c3aed] hover:bg-zinc-50 cursor-pointer dark:hover:bg-zinc-800"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            Save Current as Preset
+                          </button>
+                        </div>
+                      ) : !savedEnvironment ? (
+                        <div className="max-h-64 overflow-y-auto">
+                          {environmentList.map((env) => (
+                            <button
+                              key={env}
+                              onClick={() => setSavedEnvironment(env)}
+                              className="w-full flex items-center justify-between px-3 py-2.5 border-b border-zinc-50 last:border-0 hover:bg-zinc-50 cursor-pointer text-left dark:border-zinc-800 dark:hover:bg-zinc-800"
+                            >
+                              <span className="text-[11px] font-medium text-zinc-700 dark:text-zinc-200">{env}</span>
+                              <ChevronRight className="h-3.5 w-3.5 text-zinc-400 dark:text-zinc-500" />
+                            </button>
+                          ))}
+                          <button
+                            onClick={handleOpenAddPresetForm}
+                            className="w-full flex items-center gap-1.5 px-3 py-2.5 text-[11px] font-semibold text-[#7c3aed] hover:bg-zinc-50 cursor-pointer dark:hover:bg-zinc-800"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            Save Current as Preset
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="max-h-64 overflow-y-auto">
+                          {accountList.map((p) => (
+                            <div
+                              key={p.id}
+                              className="group w-full flex items-center justify-between px-3 py-2.5 border-b border-zinc-50 last:border-0 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800"
+                            >
+                              <button
+                                onClick={() => handleApplyPreset(p)}
+                                className="flex-1 min-w-0 text-left cursor-pointer"
+                              >
+                                <span className="text-[11px] font-medium text-zinc-700 truncate dark:text-zinc-200">
+                                  {p.accountLabel}
+                                </span>
+                              </button>
+                              <button
+                                onClick={() => handleDeletePreset(p.id)}
+                                className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-rose-500 cursor-pointer transition-opacity shrink-0 dark:text-zinc-500 dark:hover:text-rose-400"
+                                title="Delete this preset"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                          <button
+                            onClick={handleOpenAddPresetForm}
+                            className="w-full flex items-center gap-1.5 px-3 py-2.5 text-[11px] font-semibold text-[#7c3aed] hover:bg-zinc-50 cursor-pointer dark:hover:bg-zinc-800"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            Save Current as Preset
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  onClick={handleClearCredentials}
+                  className="flex items-center justify-center p-1.5 border border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 rounded-md text-zinc-600 transition-colors duration-150 cursor-pointer dark:border-zinc-700 dark:hover:border-zinc-600 dark:hover:bg-zinc-800 dark:text-zinc-300"
+                  title="Clear all credential fields"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+
+                {now && (
+                  <div className="text-[10px] font-mono font-semibold text-zinc-400 whitespace-nowrap dark:text-zinc-500">
+                    {formattedDate} · {formattedDay} · {formattedTime}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="flex flex-col gap-2.5">
@@ -332,6 +752,31 @@ export default function Home() {
 
               {/* Status & formatting button */}
               <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => handleSelectPayloadMode("direct")}
+                    className={`px-2.5 py-1.5 rounded-md text-[11px] font-semibold transition-colors duration-150 cursor-pointer border ${
+                      payloadMode === "direct"
+                        ? "bg-[#7c3aed] border-[#7c3aed] text-white"
+                        : "border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 text-zinc-600 dark:border-zinc-700 dark:hover:border-zinc-600 dark:hover:bg-zinc-800 dark:text-zinc-300"
+                    }`}
+                    title="Load the Direct payment payload template"
+                  >
+                    Direct
+                  </button>
+                  <button
+                    onClick={() => handleSelectPayloadMode("session")}
+                    className={`px-2.5 py-1.5 rounded-md text-[11px] font-semibold transition-colors duration-150 cursor-pointer border ${
+                      payloadMode === "session"
+                        ? "bg-[#7c3aed] border-[#7c3aed] text-white"
+                        : "border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 text-zinc-600 dark:border-zinc-700 dark:hover:border-zinc-600 dark:hover:bg-zinc-800 dark:text-zinc-300"
+                    }`}
+                    title="Load the Session payment payload template"
+                  >
+                    Session
+                  </button>
+                </div>
+
                 <button
                   onClick={toggleTheme}
                   className="flex items-center justify-center p-1.5 border border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 rounded-md text-zinc-600 transition-colors duration-150 cursor-pointer dark:border-zinc-700 dark:hover:border-zinc-600 dark:hover:bg-zinc-800 dark:text-zinc-300"
@@ -341,7 +786,10 @@ export default function Home() {
                 </button>
 
                 <button
-                  onClick={resetPlayground}
+                  onClick={() => {
+                    resetPlayground();
+                    setPayloadMode(null);
+                  }}
                   className="flex items-center gap-1.5 px-2.5 py-1.5 border border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 rounded-md text-[11px] font-semibold text-zinc-600 transition-colors duration-150 cursor-pointer dark:border-zinc-700 dark:hover:border-zinc-600 dark:hover:bg-zinc-800 dark:text-zinc-300"
                   title="Clear all local configurations"
                 >
@@ -349,7 +797,7 @@ export default function Home() {
                   Reset
                 </button>
 
-                <div className="relative">
+                <div className="relative" ref={historyPanelRef}>
                   <button
                     onClick={() => {
                       setShowHistoryPanel((prev) => !prev);
@@ -363,7 +811,9 @@ export default function Home() {
                   </button>
 
                   {showHistoryPanel && (
-                    <div className="absolute right-0 top-full mt-2 w-80 bg-white border border-[#eeebfc] rounded-xl shadow-lg z-50 overflow-hidden dark:bg-zinc-900 dark:border-zinc-700">
+                    <div
+                      className="absolute right-0 top-full mt-2 w-80 bg-white border border-[#eeebfc] rounded-xl shadow-lg z-50 overflow-hidden dark:bg-zinc-900 dark:border-zinc-700"
+                    >
                       <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-50 dark:border-zinc-800">
                         <div className="flex items-center gap-1.5">
                           {selectedHistoryEntry && (
@@ -378,12 +828,22 @@ export default function Home() {
                             {selectedHistoryEntry ? "Run Details" : "Last 5 Runs"}
                           </span>
                         </div>
-                        <button
-                          onClick={handleCloseHistoryPanel}
-                          className="text-[10px] font-semibold text-zinc-400 hover:text-zinc-700 cursor-pointer dark:text-zinc-500 dark:hover:text-zinc-200"
-                        >
-                          Close
-                        </button>
+                        <div className="flex items-center gap-2.5">
+                          {!selectedHistoryEntry && history.length > 0 && (
+                            <button
+                              onClick={handleClearHistory}
+                              className="text-[10px] font-semibold text-rose-500 hover:text-rose-600 cursor-pointer dark:text-rose-400 dark:hover:text-rose-300"
+                            >
+                              Clear All
+                            </button>
+                          )}
+                          <button
+                            onClick={handleCloseHistoryPanel}
+                            className="text-[10px] font-semibold text-zinc-400 hover:text-zinc-700 cursor-pointer dark:text-zinc-500 dark:hover:text-zinc-200"
+                          >
+                            Close
+                          </button>
+                        </div>
                       </div>
 
                       {!selectedHistoryEntry ? (
@@ -394,12 +854,14 @@ export default function Home() {
                             </div>
                           ) : (
                             history.map((h) => (
-                              <button
+                              <div
                                 key={h.id}
-                                onClick={() => handleOpenHistoryEntry(h.id)}
-                                className="w-full flex items-center justify-between px-3 py-2.5 border-b border-zinc-50 last:border-0 hover:bg-zinc-50 cursor-pointer text-left dark:border-zinc-800 dark:hover:bg-zinc-800"
+                                className="group w-full flex items-center justify-between px-3 py-2.5 border-b border-zinc-50 last:border-0 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800"
                               >
-                                <div className="flex items-center gap-2 min-w-0">
+                                <button
+                                  onClick={() => handleOpenHistoryEntry(h.id)}
+                                  className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer text-left"
+                                >
                                   {h.success ? (
                                     <CheckCircle className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
                                   ) : (
@@ -408,15 +870,24 @@ export default function Home() {
                                   <span className="text-[11px] font-medium text-zinc-700 truncate dark:text-zinc-200">
                                     {new Date(h.timestamp).toLocaleTimeString()}
                                   </span>
+                                </button>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <span
+                                    className={`text-[10px] font-semibold ${
+                                      h.success ? "text-emerald-600" : "text-rose-500"
+                                    }`}
+                                  >
+                                    {h.success ? "Success" : "Failed"}
+                                  </span>
+                                  <button
+                                    onClick={() => handleDeleteHistoryEntry(h.id)}
+                                    className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-rose-500 cursor-pointer transition-opacity dark:text-zinc-500 dark:hover:text-rose-400"
+                                    title="Delete this entry"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
                                 </div>
-                                <span
-                                  className={`text-[10px] font-semibold shrink-0 ${
-                                    h.success ? "text-emerald-600" : "text-rose-500"
-                                  }`}
-                                >
-                                  {h.success ? "Success" : "Failed"}
-                                </span>
-                              </button>
+                              </div>
                             ))
                           )}
                         </div>
@@ -443,31 +914,51 @@ export default function Home() {
                             >
                               Response
                             </button>
+                            {selectedHistoryEntry.steps && selectedHistoryEntry.steps.some((s) => s.requestUrl) && (
+                              <button
+                                onClick={() => setHistoryTab("steps")}
+                                className={`px-2.5 py-1 rounded-md text-[10px] font-bold cursor-pointer ${
+                                  historyTab === "steps"
+                                    ? "bg-[#7c3aed] text-white"
+                                    : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
+                                }`}
+                              >
+                                Steps
+                              </button>
+                            )}
 
-                            <button
-                              onClick={() =>
-                                handleCopyHistoryContent(
-                                  historyTab === "request"
-                                    ? selectedHistoryEntry.requestJson
-                                    : typeof (selectedHistoryEntry.response ?? selectedHistoryEntry.error) === "string"
-                                    ? (selectedHistoryEntry.response ?? selectedHistoryEntry.error) as string
-                                    : JSON.stringify(selectedHistoryEntry.response ?? selectedHistoryEntry.error, null, 2)
-                                )
-                              }
-                              className="ml-auto flex items-center gap-1 text-[10px] font-semibold text-zinc-500 hover:text-zinc-800 cursor-pointer dark:text-zinc-400 dark:hover:text-zinc-100"
-                            >
-                              {copiedHistory ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
-                              Copy
-                            </button>
+                            {historyTab !== "steps" && (
+                              <button
+                                onClick={() =>
+                                  handleCopyHistoryContent(
+                                    historyTab === "request"
+                                      ? selectedHistoryEntry.requestJson
+                                      : typeof (selectedHistoryEntry.response ?? selectedHistoryEntry.error) === "string"
+                                      ? (selectedHistoryEntry.response ?? selectedHistoryEntry.error) as string
+                                      : JSON.stringify(selectedHistoryEntry.response ?? selectedHistoryEntry.error, null, 2)
+                                  )
+                                }
+                                className="ml-auto flex items-center gap-1 text-[10px] font-semibold text-zinc-500 hover:text-zinc-800 cursor-pointer dark:text-zinc-400 dark:hover:text-zinc-100"
+                              >
+                                {copiedHistory ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                                Copy
+                              </button>
+                            )}
                           </div>
 
-                          <pre className="m-3 p-2.5 bg-zinc-50 border border-zinc-150 rounded-lg font-mono text-[10px] text-zinc-700 overflow-auto max-h-56 whitespace-pre-wrap dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200">
-                            {historyTab === "request"
-                              ? selectedHistoryEntry.requestJson
-                              : typeof (selectedHistoryEntry.response ?? selectedHistoryEntry.error) === "string"
-                              ? (selectedHistoryEntry.response ?? selectedHistoryEntry.error) as string
-                              : JSON.stringify(selectedHistoryEntry.response ?? selectedHistoryEntry.error, null, 2)}
-                          </pre>
+                          {historyTab === "steps" ? (
+                            <div className="m-3">
+                              <StepDetailList steps={selectedHistoryEntry.steps || []} />
+                            </div>
+                          ) : (
+                            <pre className="m-3 p-2.5 bg-zinc-50 border border-zinc-150 rounded-lg font-mono text-[10px] text-zinc-700 overflow-auto max-h-56 whitespace-pre-wrap dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200">
+                              {historyTab === "request"
+                                ? selectedHistoryEntry.requestJson
+                                : typeof (selectedHistoryEntry.response ?? selectedHistoryEntry.error) === "string"
+                                ? (selectedHistoryEntry.response ?? selectedHistoryEntry.error) as string
+                                : JSON.stringify(selectedHistoryEntry.response ?? selectedHistoryEntry.error, null, 2)}
+                            </pre>
+                          )}
                         </div>
                       )}
                     </div>
@@ -549,6 +1040,16 @@ export default function Home() {
                   </span>
                 )}
 
+                {!isRunning && (response || error) && steps.some((s) => s.requestUrl) && (
+                  <button
+                    onClick={() => setShowStepDetails((prev) => !prev)}
+                    className="flex items-center gap-1 text-[10px] font-semibold text-zinc-500 hover:text-zinc-800 cursor-pointer dark:text-zinc-400 dark:hover:text-zinc-100"
+                  >
+                    {showStepDetails ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                    View Step Details
+                  </button>
+                )}
+
                 {(response || error) && (
                   <button
                     onClick={handleCopyResponse}
@@ -562,7 +1063,14 @@ export default function Home() {
             </div>
 
             {/* Response contents */}
-            <div className="flex-1 flex flex-col justify-start min-h-0">
+            <div className="flex-1 flex flex-col justify-start min-h-0 overflow-y-auto">
+
+              {/* Per-step request/response inspector */}
+              {!isRunning && showStepDetails && (
+                <div className="mb-3.5">
+                  <StepDetailList steps={steps} />
+                </div>
+              )}
 
               {/* Payment URL alert notification */}
               {paymentUrl && (

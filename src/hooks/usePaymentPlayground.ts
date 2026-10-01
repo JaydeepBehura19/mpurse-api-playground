@@ -18,6 +18,13 @@ export interface StepState {
   label: string;
   status: StepStatus;
   duration?: number;
+  requestUrl?: string;
+  requestHeaders?: Record<string, string>;
+  requestBody?: any;
+  responseStatus?: number;
+  responseStatusText?: string;
+  responseData?: any;
+  responseHeaders?: Record<string, string>;
 }
 
 const STEP_DEFS: Array<{ id: string; label: string }> = [
@@ -34,9 +41,22 @@ export interface HistoryEntry {
   requestJson: string;
   response?: any;
   error?: ApiErrorDetail | string;
+  steps?: StepState[];
 }
 
 const MAX_HISTORY = 5;
+
+export interface SavedPreset {
+  id: string;
+  merchant: string;
+  environment: string;
+  accountLabel: string;
+  clientId: string;
+  clientSecret: string;
+  encryptionKey: string;
+  passKey: string;
+  mid?: string;
+}
 
 const DEFAULT_JSON = `{
   "order_id": "ORDER_${Math.floor(1000 + Math.random() * 9000)}",
@@ -75,8 +95,12 @@ export function usePaymentPlayground() {
   const [steps, setSteps] = useState<StepState[]>(
     STEP_DEFS.map((s) => ({ ...s, status: "pending" }))
   );
+  // Mirrors `steps` synchronously so history entries can read the latest value
+  // without waiting on React's async state batching.
+  const stepsRef = useRef<StepState[]>(STEP_DEFS.map((s) => ({ ...s, status: "pending" })));
   const abortControllerRef = useRef<AbortController | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [savedPresets, setSavedPresets] = useState<SavedPreset[]>([]);
 
   // Toast System
   const [toasts, setToasts] = useState<Array<{ id: string; message: string; type: "success" | "error" | "info" }>>([]);
@@ -100,6 +124,13 @@ export function usePaymentPlayground() {
       if (savedHistory) {
         try {
           setHistory(JSON.parse(savedHistory));
+        } catch (_) {}
+      }
+
+      const savedPresetsRaw = localStorage.getItem("mpurse_saved_presets");
+      if (savedPresetsRaw) {
+        try {
+          setSavedPresets(JSON.parse(savedPresetsRaw));
         } catch (_) {}
       }
     }
@@ -173,9 +204,13 @@ export function usePaymentPlayground() {
     return undefined;
   };
 
-  // Update a single step's progress state
+  // Update a single step's progress state (keeps stepsRef in sync for history snapshots)
   const updateStep = (id: string, patch: Partial<StepState>) => {
-    setSteps((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+    setSteps((prev) => {
+      const updated = prev.map((s) => (s.id === id ? { ...s, ...patch } : s));
+      stepsRef.current = updated;
+      return updated;
+    });
   };
 
   // Build a Postman-style structured error from a failed step's raw result
@@ -201,7 +236,14 @@ export function usePaymentPlayground() {
       message = `${step} failed`;
     }
 
-    updateStep(stepId, { status: "failed", duration: result.duration });
+    updateStep(stepId, {
+      status: "failed",
+      duration: result.duration,
+      responseStatus: result.status,
+      responseStatusText: result.statusText,
+      responseData: result.data,
+      responseHeaders: result.headers,
+    });
 
     const errorDetail: ApiErrorDetail = {
       step,
@@ -214,7 +256,7 @@ export function usePaymentPlayground() {
     };
 
     setError(errorDetail);
-    addHistoryEntry({ success: false, requestJson: jsonBody, error: errorDetail });
+    addHistoryEntry({ success: false, requestJson: jsonBody, error: errorDetail, steps: stepsRef.current });
     showToast(`${step} failed${result.status ? ` (${result.status})` : ""}`, "error");
     setIsRunning(false);
   };
@@ -233,6 +275,61 @@ export function usePaymentPlayground() {
       }
       return updated;
     });
+  };
+
+  // Remove a single history entry
+  const deleteHistoryEntry = (id: string) => {
+    setHistory((prev) => {
+      const updated = prev.filter((h) => h.id !== id);
+      if (typeof window !== "undefined") {
+        localStorage.setItem("mpurse_history", JSON.stringify(updated));
+      }
+      return updated;
+    });
+  };
+
+  // Clear all history entries
+  const clearHistory = () => {
+    setHistory([]);
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("mpurse_history");
+    }
+  };
+
+  // Save the currently entered credentials as a named preset
+  const addSavedPreset = (entry: Omit<SavedPreset, "id">) => {
+    setSavedPresets((prev) => {
+      const newPreset: SavedPreset = {
+        id: Math.random().toString(36).substring(2, 9),
+        ...entry,
+      };
+      const updated = [...prev, newPreset];
+      if (typeof window !== "undefined") {
+        localStorage.setItem("mpurse_saved_presets", JSON.stringify(updated));
+      }
+      return updated;
+    });
+  };
+
+  // Remove a single saved preset
+  const deleteSavedPreset = (id: string) => {
+    setSavedPresets((prev) => {
+      const updated = prev.filter((p) => p.id !== id);
+      if (typeof window !== "undefined") {
+        localStorage.setItem("mpurse_saved_presets", JSON.stringify(updated));
+      }
+      return updated;
+    });
+  };
+
+  // Clear only the 5 credential fields (Client ID, Secret, Encryption Key, Pass Key, MID)
+  const clearCredentials = () => {
+    setClientId("");
+    setClientSecret("");
+    setEncryptionKey("");
+    setPassKey("");
+    setMid("");
+    showToast("Credentials cleared", "info");
   };
 
   // Main Execute Sequence
@@ -268,19 +365,29 @@ export function usePaymentPlayground() {
     setResponse(null);
     setError(null);
     setPaymentUrl(undefined);
-    setSteps(STEP_DEFS.map((s) => ({ ...s, status: "pending" })));
+    const freshSteps = STEP_DEFS.map((s) => ({ ...s, status: "pending" as StepStatus }));
+    setSteps(freshSteps);
+    stepsRef.current = freshSteps;
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
     try {
       // STEP 1: Call Header Encryption API
-      updateStep("hencr", { status: "running" });
+      const hencrUrl = "https://encr-decr.iserveu.online/hencr";
+      const hencrHeaders = { key: encryptionKey };
+      const hencrBody = { client_id: clientId, client_secret: clientSecret };
+      updateStep("hencr", {
+        status: "running",
+        requestUrl: hencrUrl,
+        requestHeaders: hencrHeaders,
+        requestBody: hencrBody,
+      });
       const resStep1 = await executeApiStep(
-        "https://encr-decr.iserveu.online/hencr",
+        hencrUrl,
         "POST",
-        { key: encryptionKey },
-        { client_id: clientId, client_secret: clientSecret },
+        hencrHeaders,
+        hencrBody,
         true, // Always use proxy under-the-hood to prevent CORS
         controller.signal
       );
@@ -289,16 +396,30 @@ export function usePaymentPlayground() {
         failStep("hencr", resStep1);
         return;
       }
-      updateStep("hencr", { status: "success", duration: resStep1.duration });
+      updateStep("hencr", {
+        status: "success",
+        duration: resStep1.duration,
+        responseStatus: resStep1.status,
+        responseStatusText: resStep1.statusText,
+        responseData: resStep1.data,
+        responseHeaders: resStep1.headers,
+      });
 
       const encryptedHeaderSecret = resStep1.data.RequestData;
 
       // STEP 2: Call Request Body Encryption API
-      updateStep("encr", { status: "running" });
+      const encrUrl = "https://encr-decr.iserveu.online/encr";
+      const encrHeaders = { key: encryptionKey };
+      updateStep("encr", {
+        status: "running",
+        requestUrl: encrUrl,
+        requestHeaders: encrHeaders,
+        requestBody: parsedJson,
+      });
       const resStep2 = await executeApiStep(
-        "https://encr-decr.iserveu.online/encr",
+        encrUrl,
         "POST",
-        { key: encryptionKey },
+        encrHeaders,
         parsedJson,
         true,
         controller.signal
@@ -308,23 +429,36 @@ export function usePaymentPlayground() {
         failStep("encr", resStep2);
         return;
       }
-      updateStep("encr", { status: "success", duration: resStep2.duration });
+      updateStep("encr", {
+        status: "success",
+        duration: resStep2.duration,
+        responseStatus: resStep2.status,
+        responseStatusText: resStep2.statusText,
+        responseData: resStep2.data,
+        responseHeaders: resStep2.headers,
+      });
 
       const encryptedRequestBody = resStep2.data.RequestData;
 
       // STEP 3: Create Payment Session
-      updateStep("session", { status: "running" });
+      const sessionApiUrl = sessionUrl || DEFAULT_SESSION_URL;
+      const sessionHeaders = {
+        pass_key: passKey,
+        header_secrets: encryptedHeaderSecret,
+        mid: mid || "null"
+      };
+      const sessionBody = { RequestData: encryptedRequestBody };
+      updateStep("session", {
+        status: "running",
+        requestUrl: sessionApiUrl,
+        requestHeaders: sessionHeaders,
+        requestBody: sessionBody,
+      });
       const resStep3 = await executeApiStep(
-        sessionUrl || DEFAULT_SESSION_URL,
+        sessionApiUrl,
         "POST",
-        {
-          pass_key: passKey,
-          header_secrets: encryptedHeaderSecret,
-          mid: mid || "null"
-        },
-        {
-          RequestData: encryptedRequestBody
-        },
+        sessionHeaders,
+        sessionBody,
         true,
         controller.signal
       );
@@ -333,7 +467,14 @@ export function usePaymentPlayground() {
         failStep("session", resStep3);
         return;
       }
-      updateStep("session", { status: "success", duration: resStep3.duration });
+      updateStep("session", {
+        status: "success",
+        duration: resStep3.duration,
+        responseStatus: resStep3.status,
+        responseStatusText: resStep3.statusText,
+        responseData: resStep3.data,
+        responseHeaders: resStep3.headers,
+      });
 
       // STEP 4: Automatically extract ResponseData
       let sessionData = resStep3.data;
@@ -354,7 +495,7 @@ export function usePaymentPlayground() {
       if (!encryptedResponseData) {
         // If there is no encrypted ResponseData string, display the raw response
         setResponse(resStep3.data);
-        addHistoryEntry({ success: true, requestJson: jsonBody, response: resStep3.data });
+        addHistoryEntry({ success: true, requestJson: jsonBody, response: resStep3.data, steps: stepsRef.current });
         const parsedUrl = findPaymentUrlRecursive(resStep3.data);
         if (parsedUrl) {
           setPaymentUrl(parsedUrl);
@@ -364,12 +505,20 @@ export function usePaymentPlayground() {
       }
 
       // STEP 5: Automatically call decryption API (/decr)
-      updateStep("decr", { status: "running" });
+      const decrUrl = "https://encr-decr.iserveu.online/decr";
+      const decrHeaders = { key: encryptionKey };
+      const decrBody = { req: encryptedResponseData };
+      updateStep("decr", {
+        status: "running",
+        requestUrl: decrUrl,
+        requestHeaders: decrHeaders,
+        requestBody: decrBody,
+      });
       const resDecr = await executeApiStep(
-        "https://encr-decr.iserveu.online/decr",
+        decrUrl,
         "POST",
-        { key: encryptionKey },
-        { req: encryptedResponseData },
+        decrHeaders,
+        decrBody,
         true,
         controller.signal
       );
@@ -378,7 +527,14 @@ export function usePaymentPlayground() {
         failStep("decr", resDecr);
         return;
       }
-      updateStep("decr", { status: "success", duration: resDecr.duration });
+      updateStep("decr", {
+        status: "success",
+        duration: resDecr.duration,
+        responseStatus: resDecr.status,
+        responseStatusText: resDecr.statusText,
+        responseData: resDecr.data,
+        responseHeaders: resDecr.headers,
+      });
 
       // STEP 6: Render ONLY the FINAL DECRYPTED RESPONSE
       let decryptedData = resDecr.data;
@@ -389,7 +545,7 @@ export function usePaymentPlayground() {
       }
 
       setResponse(decryptedData);
-      addHistoryEntry({ success: true, requestJson: jsonBody, response: decryptedData });
+      addHistoryEntry({ success: true, requestJson: jsonBody, response: decryptedData, steps: stepsRef.current });
 
       const parsedUrl = findPaymentUrlRecursive(decryptedData);
       if (parsedUrl) {
@@ -401,12 +557,14 @@ export function usePaymentPlayground() {
 
     } catch (err: any) {
       if (isAbortError(err)) {
-        setSteps(STEP_DEFS.map((s) => ({ ...s, status: "pending" })));
+        const pendingSteps = STEP_DEFS.map((s) => ({ ...s, status: "pending" as StepStatus }));
+        setSteps(pendingSteps);
+        stepsRef.current = pendingSteps;
         showToast("Request cancelled", "info");
       } else {
         const message = err.message || "An unexpected error occurred during execution";
         setError(message);
-        addHistoryEntry({ success: false, requestJson: jsonBody, error: message });
+        addHistoryEntry({ success: false, requestJson: jsonBody, error: message, steps: stepsRef.current });
         showToast("Playground execution failed", "error");
       }
     } finally {
@@ -458,6 +616,12 @@ export function usePaymentPlayground() {
     paymentUrl,
     steps,
     history,
+    deleteHistoryEntry,
+    clearHistory,
+    savedPresets,
+    addSavedPreset,
+    deleteSavedPreset,
+    clearCredentials,
     toasts,
     executePlaygroundFlow,
     cancelPlaygroundFlow,
