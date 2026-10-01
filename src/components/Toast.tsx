@@ -12,16 +12,16 @@ export function ToastContainer({ toasts }: ToastProps) {
       <AnimatePresence>
         {toasts.map(toast => {
           let Icon = Info;
-          let bgColor = "bg-white border-zinc-200 text-zinc-800";
+          let bgColor = "bg-white border-zinc-200 text-zinc-800 dark:bg-zinc-900 dark:border-zinc-700 dark:text-zinc-100";
           let iconColor = "text-primary";
 
           if (toast.type === "success") {
             Icon = CheckCircle2;
-            bgColor = "bg-success-light border-emerald-200 text-emerald-900";
+            bgColor = "bg-success-light border-emerald-200 text-emerald-900 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-300";
             iconColor = "text-success";
           } else if (toast.type === "error") {
             Icon = AlertCircle;
-            bgColor = "bg-error-light border-red-200 text-red-900";
+            bgColor = "bg-error-light border-red-200 text-red-900 dark:bg-rose-950/40 dark:border-rose-800 dark:text-rose-300";
             iconColor = "text-error";
           }
 

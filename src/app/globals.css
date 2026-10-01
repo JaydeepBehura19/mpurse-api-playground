@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-primary: #7c3aed;
   --color-primary-hover: #6d28d9;
@@ -28,6 +30,11 @@
   --foreground: #1e1b4b; /* Deep Indigo text for better premium contrast */
 }
 
+.dark {
+  --background: #09090b;
+  --foreground: #f4f4f5;
+}
+
 body {
   background-color: var(--background);
   color: var(--foreground);
@@ -51,6 +58,14 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #d4d4d8;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
 }
 
 /* Custom styles for JSON and Editor inputs */
